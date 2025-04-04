@@ -34,11 +34,11 @@ jobs:
       - name: Find and upload Firefox artifact
         run: |
           firefox_file=$(ls .output/*-firefox.zip)
-          echo "Uploading $zip_file"
+          echo "Uploading $firefox_file"
           echo "::set-output name=firefox_file::$firefox_file"
   
       - name: Upload Firefox artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: live-folder-firefox
           path: ${{ steps.find_zip.outputs.firefox_file }}
@@ -58,11 +58,11 @@ jobs:
       - name: Find and upload Chrome artifact
         run: |
           chrome_file=$(ls .output/*-chrome.zip)
-          echo "Uploading $zip_file"
+          echo "Uploading $chrome_file"
           echo "::set-output name=chrome_file::$chrome_file"
   
       - name: Upload Chrome artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: live-folder-chrome
           path: ${{ steps.find_zip.outputs.chrome_file }}

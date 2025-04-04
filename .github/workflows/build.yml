@@ -32,38 +32,41 @@ jobs:
           bun run zip:firefox
 
       - name: Find and upload Firefox artifact
+        id: find_firefox_zip
         run: |
           firefox_file=$(ls .output/*-firefox.zip)
           echo "Uploading $firefox_file"
-          echo "::set-output name=firefox_file::$firefox_file"
+          echo "firefox_file=$firefox_file" >> $GITHUB_OUTPUT
   
       - name: Upload Firefox artifact
         uses: actions/upload-artifact@v4
         with:
           name: live-folder-firefox
-          path: ${{ steps.find_zip.outputs.firefox_file }}
+          path: ${{ steps.find_firefox_zip.outputs.firefox_file }}
 
       - name: Find and upload sources artifact
+        id: find_sources_zip
         run: |
           sources_file=$(ls .output/*-sources.zip)
           echo "Uploading $sources_file"
-          echo "::set-output name=sources_file::$sources_file"
+          echo "sources_file=$sources_file" >> $GITHUB_OUTPUT
 
       - name: Upload sources artifact
         uses: actions/upload-artifact@v4
         with:
           name: live-folder-sources
-          path: ${{ steps.find_sources.outputs.sources_file }}
+          path: ${{ steps.find_sources_zip.outputs.sources_file }}
 
       - name: Find and upload Chrome artifact
+        id: find_chrome_zip
         run: |
           chrome_file=$(ls .output/*-chrome.zip)
           echo "Uploading $chrome_file"
-          echo "::set-output name=chrome_file::$chrome_file"
-  
+          echo "chrome_file=$chrome_file" >> $GITHUB_OUTPUT
+
       - name: Upload Chrome artifact
         uses: actions/upload-artifact@v4
         with:
           name: live-folder-chrome
-          path: ${{ steps.find_zip.outputs.chrome_file }}
+          path: ${{ steps.find_chrome_zip.outputs.chrome_file }}
 

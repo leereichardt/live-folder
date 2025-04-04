@@ -31,20 +31,39 @@ jobs:
           bun run zip
           bun run zip:firefox
 
-      - name: Upload artifacts for Firefox
-        uses: actions/upload-artifact@v4
+      - name: Find and upload Firefox artifact
+        run: |
+          firefox_file=$(ls .output/*-firefox.zip)
+          echo "Uploading $zip_file"
+          echo "::set-output name=firefox_file::$firefox_file"
+  
+      - name: Upload Firefox artifact
+        uses: actions/upload-artifact@v3
         with:
           name: live-folder-firefox
-          path: .output/*-firefox.zip
+          path: ${{ steps.find_zip.outputs.firefox_file }}
 
-      - name: Upload sources for Firefox
+      - name: Find and upload sources artifact
+        run: |
+          sources_file=$(ls .output/*-sources.zip)
+          echo "Uploading $sources_file"
+          echo "::set-output name=sources_file::$sources_file"
+
+      - name: Upload sources artifact
         uses: actions/upload-artifact@v4
         with:
           name: live-folder-sources
-          path: .output/*-sources.zip
+          path: ${{ steps.find_sources.outputs.sources_file }}
 
-      - name: Upload artifacts for Chrome
-        uses: actions/upload-artifact@v4
+      - name: Find and upload Chrome artifact
+        run: |
+          chrome_file=$(ls .output/*-chrome.zip)
+          echo "Uploading $zip_file"
+          echo "::set-output name=chrome_file::$chrome_file"
+  
+      - name: Upload Chrome artifact
+        uses: actions/upload-artifact@v3
         with:
           name: live-folder-chrome
-          path: .output/*-chrome.zip
+          path: ${{ steps.find_zip.outputs.chrome_file }}
+

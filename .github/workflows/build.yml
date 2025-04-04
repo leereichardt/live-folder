@@ -32,7 +32,7 @@ jobs:
           bun run zip:firefox
 
       - name: Upload artifacts for Firefox
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: live-folder-firefox
           path: .output/firefox-mv2/*-firefox.zip

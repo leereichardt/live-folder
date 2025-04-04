@@ -1,0 +1,44 @@
+name: Build Extension
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Lint and format
+        run: bun run ci
+
+      - name: Build source files
+        run: |
+          bun run zip
+          bun run zip:firefox
+
+      - name: Upload artifacts for Firefox
+        uses: actions/upload-artifact@v3
+        with:
+          name: live-folder-firefox
+          path: .output/firefox-mv2/*-firefox.zip
+
+          name: live-folder-sources
+          path: .output/firefox-mv2/*-sources.zip
+
+          name: live-folder-chrome
+          path: .output/chrome-mv3/*-chrome.zip

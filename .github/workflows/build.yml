@@ -38,13 +38,13 @@ jobs:
           path: .output/firefox-mv2/*-firefox.zip
 
       - name: Upload sources for Firefox
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: live-folder-sources
           path: .output/firefox-mv2/*-sources.zip
 
       - name: Upload artifacts for Chrome
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: live-folder-chrome
           path: .output/chrome-mv3/*-chrome.zip

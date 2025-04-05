@@ -16,7 +16,6 @@ export class LiveFolder {
   private constructor() {
     this._debug = true;
     this._githubHandler = new GithubHandler({
-      lf: this,
       debug: this._debug,
     });
     this._configHandler = new ConfigHandler(this, this._githubHandler);

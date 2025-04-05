@@ -10,7 +10,7 @@ export default defineConfig({
         id: "lf@devsor.us",
       },
     },
-    permissions: ["bookmarks", "storage", "alarms", "cookies", "tabs"],
+    permissions: ["bookmarks", "storage", "alarms", "cookies"],
     host_permissions: ["*://*.github.com/*"],
   },
   imports: {

@@ -2,7 +2,7 @@
   "name": "Live Folder",
   "description": "Track your github pull requests automatically and have them ready for review in your browser's bookmarks.",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

@@ -13,7 +13,6 @@ export type PullRequest = {
 export class GithubHandler {
   private readonly _debug: boolean;
   private _isAuthenticated = false;
-  private _lf: LiveFolder;
 
   private readonly _GH_DOMAIN_WITH_SUBDOMAIN = ".github.com";
   private readonly _GH_COOKIE_NAME = "logged_in";
@@ -22,9 +21,8 @@ export class GithubHandler {
   private readonly _PR_TITLE_CLASS = ".js-navigation-open";
   private readonly _PRS_URL = "https://github.com/pulls";
 
-  constructor({ lf, debug }: { lf: LiveFolder; debug: boolean }) {
+  constructor({ debug }: { debug: boolean }) {
     this._debug = debug;
-    this._lf = lf;
 
     onMessage("AUTH_STATE", async () => {
       const newAuthState = await this.isAuthenticatedFromBrowser();
@@ -44,9 +42,10 @@ export class GithubHandler {
   public updateAuthState(newAuthState: boolean) {
     if (newAuthState !== this._isAuthenticated) {
       this._isAuthenticated = newAuthState;
-      if (newAuthState) {
-        this._lf.syncFolder();
-      }
+      // TODO: Find a way to handle the initial auth state vs user logging in (after logging in user has to wait one minute for the sync)
+      //if (newAuthState) {
+      //  this._lf.syncFolder();
+      //}
     }
   }
 

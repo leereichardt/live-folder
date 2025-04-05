@@ -7,7 +7,7 @@ export default defineConfig({
   manifest: {
     browser_specific_settings: {
       gecko: {
-        id: "live-folder@devsor.us",
+        id: "lf@devsor.us",
       },
     },
     permissions: ["bookmarks", "storage", "alarms", "cookies", "tabs"],

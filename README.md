@@ -8,21 +8,21 @@ You can customize the folder's name, pull request's title format, and interval b
 
 ## Build
 
-Build for Firefox:
-```bash
-bun install
-bun run zip:firefox
-```
-
 Build for Chrome:
 ```bash
 bun install
 bun run zip
 ```
 
+Build for Firefox:
+```bash
+bun install
+bun run zip:firefox
+```
+
 ## Development
 
-Run the development server:
+Run the development server for Chrome:
 ```bash
 bun install
 bun run dev

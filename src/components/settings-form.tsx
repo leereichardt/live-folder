@@ -82,7 +82,7 @@ export function SettingsForm({
   return (
     <Form {...form}>
       <form
-        onSubmit={void form.handleSubmit(onSubmit)}
+        onSubmit={form.handleSubmit(onSubmit)}
         className="flex flex-col gap-y-2"
       >
         <FormField

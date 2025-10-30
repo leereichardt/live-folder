@@ -2,12 +2,18 @@ import { onMessage } from "webext-bridge/background";
 import { type GithubHandler, type PullRequest } from "./github-handler";
 import { type LiveFolder } from "./live-folder";
 
+export type PrFilterType = "assigned" | "review-requested" | "both";
+
 export type LiveFolderConfig = {
   id: string;
   name: string;
   refreshInterval: number; // in minutes
   prNameFormat: string;
   lastPrUpdate: number;
+  tabGroupId: number;
+  tabGroupColor: chrome.tabGroups.ColorEnum;
+  prFilter: PrFilterType;
+  organizationFilter: string; // comma-separated list of organizations
 };
 
 export class ConfigHandler {
@@ -18,6 +24,10 @@ export class ConfigHandler {
     refreshInterval: 1,
     prNameFormat: "[%repository%] %name%",
     lastPrUpdate: 0,
+    tabGroupId: -1,
+    tabGroupColor: "blue",
+    prFilter: "both",
+    organizationFilter: "",
   };
   private _lf: LiveFolder;
   private _githubHandler: GithubHandler;
@@ -28,8 +38,11 @@ export class ConfigHandler {
 
     onMessage("SET_CONFIG", async (message) => {
       try {
+        console.log("[SET-CONFIG] Saving settings and triggering sync...");
         await this.setSettings(message.data);
+        console.log("[SET-CONFIG] Settings saved, syncing folder now...");
         await this._lf.syncFolder();
+        console.log("[SET-CONFIG] Sync completed successfully!");
         return { success: true };
       } catch (error) {
         console.error(
@@ -148,8 +161,7 @@ export class ConfigHandler {
       }
 
       try {
-        const folder = (await browser.bookmarks.get(settings.id))[0];
-        return folder;
+        return (await browser.bookmarks.get(settings.id))[0];
       } catch (error) {
         if (
           error instanceof Error &&
@@ -227,5 +239,9 @@ export class ConfigHandler {
       .replace(/%repository%/g, pr.repository_name)
       .replace(/%name%/g, pr.name)
       .replace(/%number%/g, pr.number.toString());
+  }
+
+  public supportsTabGroups() {
+    return import.meta.env.BROWSER === "chrome";
   }
 }

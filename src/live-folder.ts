@@ -1,5 +1,6 @@
 import { GithubHandler, type PullRequest } from "./github-handler";
 import { ConfigHandler } from "./config-handler";
+import { TabGroupHandler } from "./tab-group-handler";
 
 export class LiveFolder {
   private static _instance: LiveFolder;
@@ -8,6 +9,7 @@ export class LiveFolder {
 
   private readonly _githubHandler: GithubHandler;
   private readonly _configHandler: ConfigHandler;
+  private readonly _tabGroupHandler: TabGroupHandler;
 
   private readonly _alarms = {
     UPDATE_PRS: "update-pull-requests",
@@ -19,6 +21,9 @@ export class LiveFolder {
       debug: this._debug,
     });
     this._configHandler = new ConfigHandler(this, this._githubHandler);
+    this._tabGroupHandler = new TabGroupHandler({
+      debug: this._debug,
+    });
   }
 
   static getInstance() {
@@ -32,10 +37,22 @@ export class LiveFolder {
       await this._configHandler.ensureSettings();
 
       if (this._githubHandler.authenticated) {
-        const folder = await this._configHandler.ensureFolder();
-        if (!folder) {
-          console.error("[INIT]: Failed to create or retrieve folder");
-          return;
+        if (this._configHandler.supportsTabGroups()) {
+          // Chrome: Tab groups
+          const settings = await this._configHandler.getSettings();
+          const groupId = await this._tabGroupHandler.ensureTabGroup({
+            title: settings.name,
+            color: settings.tabGroupColor,
+            groupId: settings.tabGroupId,
+          });
+          await this._configHandler.setSettings({ tabGroupId: groupId });
+        } else {
+          // Firefox: Bookmarks
+          const folder = await this._configHandler.ensureFolder();
+          if (!folder) {
+            console.error("[INIT]: Failed to create or retrieve folder");
+            return;
+          }
         }
 
         await this._setupAlarms();
@@ -84,34 +101,15 @@ export class LiveFolder {
         return;
       }
 
-      const folder = await this._configHandler.getFolder();
-      if (!folder) {
-        if (this._debug) console.log("[SYNC-FOLDER] No folder found, creating");
-        const newFolder = await this._configHandler.initFolder();
-        if (!newFolder) {
-          console.error("[SYNC-FOLDER] Failed to create folder");
-          return;
-        }
-      }
+      const settings = await this._configHandler.getSettings();
 
-      const currentFolder = await this._configHandler.getFolder();
-      if (!currentFolder) {
-        console.error("[SYNC-FOLDER] Folder not found after creation attempt");
-        return;
-      }
-
-      const pullRequests = await this._githubHandler.getPullRequests();
+      const pullRequests = await this._githubHandler.getPullRequests(
+        settings.prFilter,
+        settings.organizationFilter
+      );
       if (!pullRequests) {
         if (this._debug) console.log("[SYNC-FOLDER] No pull requests found");
         return;
-      }
-
-      const settings = await this._configHandler.getSettings();
-
-      if (settings.name && currentFolder.title !== settings.name) {
-        await browser.bookmarks.update(currentFolder.id, {
-          title: settings.name,
-        });
       }
 
       const updatePrsAlarm = await browser.alarms.get(this._alarms.UPDATE_PRS);
@@ -119,11 +117,57 @@ export class LiveFolder {
         await this.updateRefreshInterval(settings.refreshInterval);
       }
 
-      await this._syncBookmarks({
-        folderId: currentFolder.id,
-        pullRequests,
-        prNameFormat: settings.prNameFormat,
-      });
+      if (this._configHandler.supportsTabGroups()) {
+        // Chrome: Use tab groups
+        let groupId = settings.tabGroupId;
+
+        // Ensure tab group exists and is up to date
+        groupId = await this._tabGroupHandler.ensureTabGroup({
+          title: settings.name,
+          color: settings.tabGroupColor,
+          groupId,
+        });
+
+        if (groupId !== settings.tabGroupId) {
+          await this._configHandler.setSettings({ tabGroupId: groupId });
+        }
+
+        await this._tabGroupHandler.syncTabs({
+          groupId,
+          pullRequests,
+          prNameFormat: settings.prNameFormat,
+          formatPrName: this._configHandler.formatPrName.bind(this._configHandler),
+        });
+      } else {
+        // Firefox: Use bookmarks
+        const folder = await this._configHandler.getFolder();
+        if (!folder) {
+          if (this._debug) console.log("[SYNC-FOLDER] No folder found, creating");
+          const newFolder = await this._configHandler.initFolder();
+          if (!newFolder) {
+            console.error("[SYNC-FOLDER] Failed to create folder");
+            return;
+          }
+        }
+
+        const currentFolder = await this._configHandler.getFolder();
+        if (!currentFolder) {
+          console.error("[SYNC-FOLDER] Folder not found after creation attempt");
+          return;
+        }
+
+        if (settings.name && currentFolder.title !== settings.name) {
+          await browser.bookmarks.update(currentFolder.id, {
+            title: settings.name,
+          });
+        }
+
+        await this._syncBookmarks({
+          folderId: currentFolder.id,
+          pullRequests,
+          prNameFormat: settings.prNameFormat,
+        });
+      }
 
       await this._configHandler.setSettings({
         lastPrUpdate: Date.now(),

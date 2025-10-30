@@ -10,6 +10,7 @@ export type LiveFolderConfig = {
   refreshInterval: number; // in minutes
   prNameFormat: string;
   lastPrUpdate: number;
+  lastPrCount: number; // track previous PR count to detect new PRs
   tabGroupId: number;
   tabGroupColor: chrome.tabGroups.ColorEnum;
   prFilter: PrFilterType;
@@ -24,6 +25,7 @@ export class ConfigHandler {
     refreshInterval: 1,
     prNameFormat: "[%repository%] %name%",
     lastPrUpdate: 0,
+    lastPrCount: 0,
     tabGroupId: -1,
     tabGroupColor: "blue",
     prFilter: "both",

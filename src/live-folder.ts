@@ -105,7 +105,7 @@ export class LiveFolder {
 
       const pullRequests = await this._githubHandler.getPullRequests(
         settings.prFilter,
-        settings.organizationFilter
+        settings.organizationFilter,
       );
       if (!pullRequests) {
         if (this._debug) console.log("[SYNC-FOLDER] No pull requests found");
@@ -132,17 +132,55 @@ export class LiveFolder {
           await this._configHandler.setSettings({ tabGroupId: groupId });
         }
 
-        await this._tabGroupHandler.syncTabs({
+        // Attempt to sync tabs
+        const syncSuccess = await this._tabGroupHandler.syncTabs({
           groupId,
           pullRequests,
           prNameFormat: settings.prNameFormat,
-          formatPrName: this._configHandler.formatPrName.bind(this._configHandler),
+          formatPrName: this._configHandler.formatPrName.bind(
+            this._configHandler,
+          ),
+          previousPrCount: settings.lastPrCount,
         });
+
+        // If sync failed (group became invalid), recreate the group and retry once
+        if (!syncSuccess) {
+          console.warn(
+            "[SYNC-FOLDER] Tab group sync failed, recreating group and retrying...",
+          );
+
+          // Force recreation by searching only by title (not using stored groupId)
+          groupId = await this._tabGroupHandler.ensureTabGroup({
+            title: settings.name,
+            color: settings.tabGroupColor,
+            groupId: -1, // Pass -1 to force search by title or create new
+          });
+
+          await this._configHandler.setSettings({ tabGroupId: groupId });
+
+          // Retry sync with new group
+          const retrySuccess = await this._tabGroupHandler.syncTabs({
+            groupId,
+            pullRequests,
+            prNameFormat: settings.prNameFormat,
+            formatPrName: this._configHandler.formatPrName.bind(
+              this._configHandler,
+            ),
+            previousPrCount: settings.lastPrCount,
+          });
+
+          if (!retrySuccess) {
+            console.error(
+              "[SYNC-FOLDER] Failed to sync tabs even after recreating group",
+            );
+          }
+        }
       } else {
         // Firefox: Use bookmarks
         const folder = await this._configHandler.getFolder();
         if (!folder) {
-          if (this._debug) console.log("[SYNC-FOLDER] No folder found, creating");
+          if (this._debug)
+            console.log("[SYNC-FOLDER] No folder found, creating");
           const newFolder = await this._configHandler.initFolder();
           if (!newFolder) {
             console.error("[SYNC-FOLDER] Failed to create folder");
@@ -152,7 +190,9 @@ export class LiveFolder {
 
         const currentFolder = await this._configHandler.getFolder();
         if (!currentFolder) {
-          console.error("[SYNC-FOLDER] Folder not found after creation attempt");
+          console.error(
+            "[SYNC-FOLDER] Folder not found after creation attempt",
+          );
           return;
         }
 
@@ -171,6 +211,7 @@ export class LiveFolder {
 
       await this._configHandler.setSettings({
         lastPrUpdate: Date.now(),
+        lastPrCount: pullRequests.length,
       });
 
       if (this._debug) console.log("[SYNC-FOLDER] Sync completed successfully");

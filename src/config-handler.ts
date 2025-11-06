@@ -93,6 +93,9 @@ export class ConfigHandler {
     });
 
     browser.runtime.onStartup.addListener(async () => {
+      // Wait for initialization to complete before syncing
+      // This prevents race conditions on startup
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       await this._lf.syncFolder();
       const newAuthState =
         await this._githubHandler.isAuthenticatedFromBrowser();

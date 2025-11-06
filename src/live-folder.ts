@@ -6,6 +6,8 @@ export class LiveFolder {
   private static _instance: LiveFolder;
   private _initialized = false;
   private readonly _debug: boolean;
+  private _alarmListenerSetup = false;
+  private _isSyncing = false;
 
   private readonly _githubHandler: GithubHandler;
   private readonly _configHandler: ConfigHandler;
@@ -66,32 +68,34 @@ export class LiveFolder {
     }
   }
 
-  private async _setupAlarms() {
-    try {
-      if (this._debug) console.log("[SETUP-ALARMS]", this._alarms.UPDATE_PRS);
-
-      const { refreshInterval } = await this._configHandler.getSettings();
-
-      await browser.alarms.clear(this._alarms.UPDATE_PRS);
-
-      browser.alarms.create(this._alarms.UPDATE_PRS, {
-        periodInMinutes: refreshInterval,
-        when: Date.now() + refreshInterval * 60 * 1000,
-      });
-
-      browser.alarms.onAlarm.addListener(async (alarm) => {
-        if (this._debug) console.log("[ON-ALARM]", alarm);
-
-        if (alarm.name === this._alarms.UPDATE_PRS) {
-          await this.syncFolder();
-        }
-      });
-    } catch (error) {
-      console.error("[SETUP-ALARMS] Error setting up alarms:", error);
-    }
-  }
-
   public async syncFolder() {
+    // Wait for initialization to complete
+    if (!this._initialized) {
+      if (this._debug)
+        console.log(
+          "[SYNC-FOLDER] Not yet initialized, waiting before sync...",
+        );
+      // Wait up to 5 seconds for initialization
+      let waited = 0;
+      while (!this._initialized && waited < 5000) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        waited += 100;
+      }
+      if (!this._initialized) {
+        console.warn("[SYNC-FOLDER] Initialization timeout, aborting sync");
+        return;
+      }
+    }
+
+    // Prevent concurrent syncs
+    if (this._isSyncing) {
+      if (this._debug)
+        console.log("[SYNC-FOLDER] Already syncing, skipping this call");
+      return;
+    }
+
+    this._isSyncing = true;
+
     try {
       if (this._debug) console.log("[SYNC-FOLDER] Starting sync");
 
@@ -121,7 +125,7 @@ export class LiveFolder {
         // Chrome: Use tab groups
         let groupId = settings.tabGroupId;
 
-        // Ensure tab group exists and is up to date
+        // Ensure the tab group exists and is up to date
         groupId = await this._tabGroupHandler.ensureTabGroup({
           title: settings.name,
           color: settings.tabGroupColor,
@@ -143,11 +147,18 @@ export class LiveFolder {
           previousPrCount: settings.lastPrCount,
         });
 
-        // If sync failed (group became invalid), recreate the group and retry once
+        // If sync failed (the group became invalid), recreate the group and retry once
         if (!syncSuccess) {
           console.warn(
             "[SYNC-FOLDER] Tab group sync failed, recreating group and retrying...",
           );
+
+          // Close any ungrouped PR tabs to prevent duplicates
+          const prUrls = new Set(pullRequests.map((pr) => pr.url));
+          await this._tabGroupHandler.closeUngroupedPrTabs(prUrls);
+
+          // Wait a bit for cleanup to complete
+          await new Promise((resolve) => setTimeout(resolve, 100));
 
           // Force recreation by searching only by title (not using stored groupId)
           groupId = await this._tabGroupHandler.ensureTabGroup({
@@ -158,7 +169,7 @@ export class LiveFolder {
 
           await this._configHandler.setSettings({ tabGroupId: groupId });
 
-          // Retry sync with new group
+          // Retry sync with a new group
           const retrySuccess = await this._tabGroupHandler.syncTabs({
             groupId,
             pullRequests,
@@ -217,6 +228,38 @@ export class LiveFolder {
       if (this._debug) console.log("[SYNC-FOLDER] Sync completed successfully");
     } catch (error) {
       console.error("[SYNC-FOLDER] Error syncing folder:", error);
+    } finally {
+      this._isSyncing = false;
+    }
+  }
+
+  private async _setupAlarms() {
+    try {
+      if (this._debug) console.log("[SETUP-ALARMS]", this._alarms.UPDATE_PRS);
+
+      const { refreshInterval } = await this._configHandler.getSettings();
+
+      await browser.alarms.clear(this._alarms.UPDATE_PRS);
+
+      browser.alarms.create(this._alarms.UPDATE_PRS, {
+        periodInMinutes: refreshInterval,
+        when: Date.now() + refreshInterval * 60 * 1000,
+      });
+
+      // Only add the listener once
+      if (!this._alarmListenerSetup) {
+        browser.alarms.onAlarm.addListener(async (alarm) => {
+          if (this._debug) console.log("[ON-ALARM]", alarm);
+
+          if (alarm.name === this._alarms.UPDATE_PRS) {
+            await this.syncFolder();
+          }
+        });
+        this._alarmListenerSetup = true;
+        if (this._debug) console.log("[SETUP-ALARMS] Alarm listener set up");
+      }
+    } catch (error) {
+      console.error("[SETUP-ALARMS] Error setting up alarms:", error);
     }
   }
 

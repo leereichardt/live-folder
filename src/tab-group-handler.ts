@@ -79,7 +79,7 @@ export class TabGroupHandler {
         return existingByTitle.id;
       }
 
-      // Check if stored groupId is still valid
+      // Check if the stored groupId is still valid
       if (groupId !== undefined && groupId !== -1) {
         const existingGroup = await this.getTabGroup(groupId);
         if (existingGroup) {
@@ -92,7 +92,7 @@ export class TabGroupHandler {
         }
       }
 
-      // Create new group with a placeholder tab
+      // Create a new group with a placeholder tab
       // We'll keep this tab until we have real PR tabs
       const currentWindow = await chrome.windows.getCurrent();
       const tab = await chrome.tabs.create({
@@ -161,6 +161,9 @@ export class TabGroupHandler {
 
       // Check for ungrouped tabs that match PR URLs and group them
       // This handles the case where tabs were created but failed to group (e.g., after sleep)
+      // Wait a bit to allow any pending tabs to finish loading
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       const currentWindow = await chrome.windows.getCurrent();
       const allWindowTabs = await chrome.tabs.query({
         windowId: currentWindow.id,
@@ -211,7 +214,7 @@ export class TabGroupHandler {
           // Tab already exists, just mark as processed
           processedUrls.add(pr.url);
         } else {
-          // Create new tab
+          // Create a new tab
           const currentWindow = await chrome.windows.getCurrent();
           const newTab = await chrome.tabs.create({
             windowId: currentWindow.id,
@@ -220,6 +223,9 @@ export class TabGroupHandler {
           });
 
           if (newTab.id) {
+            // Small delay to ensure tab is ready to be grouped
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
             try {
               await chrome.tabs.group({
                 tabIds: [newTab.id],
@@ -270,11 +276,31 @@ export class TabGroupHandler {
         }
       }
 
+      // Ensure the group has at least one tab (add placeholder if needed)
+      let remainingTabs = await chrome.tabs.query({ groupId });
+      if (remainingTabs.length === 0) {
+        const currentWindow = await chrome.windows.getCurrent();
+        const placeholderTab = await chrome.tabs.create({
+          windowId: currentWindow.id,
+          active: false,
+          url: "about:blank",
+        });
+
+        if (placeholderTab.id) {
+          await chrome.tabs.group({
+            tabIds: [placeholderTab.id],
+            groupId,
+          });
+        }
+
+        // Update tabs list
+        remainingTabs = await chrome.tabs.query({ groupId });
+      }
+
       // Position the group after pinned tabs
       await this.positionGroupAfterPinnedTabs(groupId);
 
-      // Auto-collapse if empty, but preserve collapsed state if has tabs
-      const remainingTabs = await chrome.tabs.query({ groupId });
+      // Auto-collapse if empty, but preserve the collapsed state if it has tabs
       if (
         remainingTabs.length === 0 ||
         (remainingTabs.length === 1 && remainingTabs[0].url === "about:blank")
@@ -311,7 +337,7 @@ export class TabGroupHandler {
           await this._resetTitle();
         }, 30000);
       } else if (!tabGroup.collapsed && tabGroup.title !== this._baseTitle) {
-        // If expanded and title has changed, reset immediately
+        // If expanded and the title has changed, reset immediately
         await this._resetTitle();
       }
 
@@ -331,63 +357,84 @@ export class TabGroupHandler {
     }
   }
 
-  private _setupTabListener() {
-    if (this._listenerSetup) return;
+  public async positionGroupAfterPinnedTabs(groupId: number) {
+    try {
+      const currentWindow = await chrome.windows.getCurrent();
 
-    // Listen for tab URL changes (when navigating within an existing tab)
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-      // Only process when URL changes
-      if (!changeInfo.url) return;
-      if (this._currentGroupId === null) return;
+      // Get all pinned tabs to find the position
+      const pinnedTabs = await chrome.tabs.query({
+        windowId: currentWindow.id,
+        pinned: true,
+      });
 
-      // Check if this tab is in our PR group
-      if (tab.groupId !== this._currentGroupId) return;
+      const targetPosition = pinnedTabs.length;
 
-      const url = changeInfo.url;
+      // Get all tabs in our group
+      const groupTabs = await chrome.tabs.query({ groupId });
 
-      // Check if the new URL is a GitHub PR URL
-      const isPrUrl = url.includes("github.com") && url.includes("/pull/");
+      if (groupTabs.length === 0) return;
 
-      if (!isPrUrl) {
-        // Tab navigated away from PR, ungroup and position it after the group
-        void this._ungroupAndPositionAfterGroup(tabId);
+      // Sort tabs by their current index to maintain order within the group
+      groupTabs.sort((a, b) => (a.index || 0) - (b.index || 0));
+
+      // Check if group is already in the correct position
+      const firstTabIndex = groupTabs[0].index || 0;
+      if (firstTabIndex === targetPosition) {
+        if (this._debug) {
+          console.log(
+            "[POSITION-GROUP] Group already at correct position",
+            targetPosition,
+          );
+        }
+        return;
       }
-    });
 
-    // Listen for new tabs created in the group (e.g., Cmd/Ctrl+click)
-    chrome.tabs.onCreated.addListener((tab) => {
-      if (this._currentGroupId === null) return;
+      // Move all group tabs to start at the target position
+      const tabIds = groupTabs
+        .map((tab) => tab.id)
+        .filter((id): id is number => id !== undefined);
 
-      // Check if this new tab is in our PR group
-      if (tab.groupId !== this._currentGroupId) return;
+      if (tabIds.length > 0) {
+        await chrome.tabs.move(tabIds, { index: targetPosition });
 
-      // Give the tab a moment to load and get its URL
-      setTimeout(() => {
-        chrome.tabs
-          .get(tab.id!)
-          .then((updatedTab) => {
-            const url = updatedTab.url || "";
+        // Re-group any tabs that may have been ungrouped during the move
+        // Wait a moment for the move to complete
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
-            // Check if the URL is a GitHub PR URL
-            const isPrUrl =
-              url.includes("github.com") && url.includes("/pull/");
-
-            if (!isPrUrl && url !== "about:blank") {
-              // New tab is not a PR, ungroup and position it after the group
-              void this._ungroupAndPositionAfterGroup(updatedTab.id!);
+        for (const tabId of tabIds) {
+          try {
+            const tab = await chrome.tabs.get(tabId);
+            if (tab.groupId !== groupId) {
+              await chrome.tabs.group({ tabIds: [tabId], groupId });
+              if (this._debug) {
+                console.log(
+                  "[POSITION-GROUP] Re-grouped tab that was ungrouped during move:",
+                  tabId,
+                );
+              }
             }
-          })
-          .catch((error) => {
-            // Tab might have been closed already
-            if (this._debug) {
-              console.log("[TAB-LISTENER] Could not get tab info:", error);
-            }
-          });
-      }, 100); // Small delay to let the tab URL populate
-    });
+          } catch (error) {
+            console.error(
+              "[POSITION-GROUP] Error re-grouping tab:",
+              tabId,
+              error,
+            );
+          }
+        }
 
-    this._listenerSetup = true;
-    if (this._debug) console.log("[TAB-LISTENER] Tab listeners set up");
+        if (this._debug) {
+          console.log(
+            "[POSITION-GROUP] Moved group to position",
+            targetPosition,
+            "after",
+            pinnedTabs.length,
+            "pinned tabs",
+          );
+        }
+      }
+    } catch (error) {
+      console.error("[POSITION-GROUP] Error positioning tab group:", error);
+    }
   }
 
   public async getTabGroup(
@@ -446,46 +493,37 @@ export class TabGroupHandler {
     if (this._debug) console.log("[TAB-GROUP-LISTENER] Tab group listener set up");
   }
 
-  public async positionGroupAfterPinnedTabs(groupId: number) {
+  public async closeUngroupedPrTabs(prUrls: Set<string>) {
     try {
       const currentWindow = await chrome.windows.getCurrent();
-
-      // Get all pinned tabs to find the position
-      const pinnedTabs = await chrome.tabs.query({
+      const allWindowTabs = await chrome.tabs.query({
         windowId: currentWindow.id,
-        pinned: true,
       });
 
-      const targetPosition = pinnedTabs.length;
+      const ungroupedPrTabs = allWindowTabs.filter(
+        (tab) =>
+          tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE &&
+          tab.url &&
+          prUrls.has(tab.url),
+      );
 
-      // Get all tabs in our group
-      const groupTabs = await chrome.tabs.query({ groupId });
-
-      if (groupTabs.length === 0) return;
-
-      // Sort tabs by their current index to maintain order within the group
-      groupTabs.sort((a, b) => (a.index || 0) - (b.index || 0));
-
-      // Move all group tabs to start at the target position
-      const tabIds = groupTabs
-        .map((tab) => tab.id)
-        .filter((id): id is number => id !== undefined);
-
-      if (tabIds.length > 0) {
-        await chrome.tabs.move(tabIds, { index: targetPosition });
-
+      if (ungroupedPrTabs.length > 0) {
         if (this._debug) {
           console.log(
-            "[POSITION-GROUP] Moved group to position",
-            targetPosition,
-            "after",
-            pinnedTabs.length,
-            "pinned tabs",
+            "[CLOSE-UNGROUPED] Closing",
+            ungroupedPrTabs.length,
+            "ungrouped PR tabs",
           );
+        }
+
+        for (const tab of ungroupedPrTabs) {
+          if (tab.id) {
+            await chrome.tabs.remove(tab.id);
+          }
         }
       }
     } catch (error) {
-      console.error("[POSITION-GROUP] Error positioning tab group:", error);
+      console.error("[CLOSE-UNGROUPED] Error closing ungrouped tabs:", error);
     }
   }
 
@@ -510,5 +548,64 @@ export class TabGroupHandler {
     } catch (error) {
       console.error("[RESET-TITLE] Error resetting title:", error);
     }
+  }
+
+  private _setupTabListener() {
+    if (this._listenerSetup) return;
+
+    // Listen for tab URL changes (when navigating within an existing tab)
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      // Only process when URL changes
+      if (!changeInfo.url) return;
+      if (this._currentGroupId === null) return;
+
+      // Check if this tab is in our PR group
+      if (tab.groupId !== this._currentGroupId) return;
+
+      const url = changeInfo.url;
+
+      // Check if the new URL is a GitHub PR URL
+      const isPrUrl = url.includes("github.com") && url.includes("/pull/");
+
+      if (!isPrUrl) {
+        // Tab navigated away from PR, then ungroup and position the tab after the group
+        void this._ungroupAndPositionAfterGroup(tabId);
+      }
+    });
+
+    // Listen for new tabs created in the group (e.g., Cmd/Ctrl+click)
+    chrome.tabs.onCreated.addListener((tab) => {
+      if (this._currentGroupId === null) return;
+
+      // Check if this new tab is in our PR group
+      if (tab.groupId !== this._currentGroupId) return;
+
+      // Give the tab a moment to load and get its URL
+      setTimeout(() => {
+        chrome.tabs
+          .get(tab.id!)
+          .then((updatedTab) => {
+            const url = updatedTab.url || "";
+
+            // Check if the URL is a GitHub PR URL
+            const isPrUrl =
+              url.includes("github.com") && url.includes("/pull/");
+
+            if (!isPrUrl && url !== "about:blank") {
+              // The new tab is not a PR, ungroup and position it after the group
+              void this._ungroupAndPositionAfterGroup(updatedTab.id!);
+            }
+          })
+          .catch((error) => {
+            // Tab might have been closed already
+            if (this._debug) {
+              console.log("[TAB-LISTENER] Could not get tab info:", error);
+            }
+          });
+      }, 100); // Small delay to let the tab URL populate
+    });
+
+    this._listenerSetup = true;
+    if (this._debug) console.log("[TAB-LISTENER] Tab listeners set up");
   }
 }

@@ -154,8 +154,7 @@ export class LiveFolder {
           );
 
           // Close any ungrouped PR tabs to prevent duplicates
-          const prUrls = new Set(pullRequests.map((pr) => pr.url));
-          await this._tabGroupHandler.closeUngroupedPrTabs(prUrls);
+          await this._tabGroupHandler.closeUngroupedPrTabs(pullRequests);
 
           // Wait a bit for cleanup to complete
           await new Promise((resolve) => setTimeout(resolve, 100));

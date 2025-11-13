@@ -14,6 +14,40 @@ export class TabGroupHandler {
     this._debug = debug;
   }
 
+  /**
+   * Extracts the base PR URL from a GitHub PR URL, removing fragments and sub-paths.
+   * Examples:
+   * - https://github.com/owner/repo/pull/123 -> https://github.com/owner/repo/pull/123
+   * - https://github.com/owner/repo/pull/123#issuecomment-456 -> https://github.com/owner/repo/pull/123
+   * - https://github.com/owner/repo/pull/123/files -> https://github.com/owner/repo/pull/123
+   * - https://github.com/owner/repo/pull/123/commits -> https://github.com/owner/repo/pull/123
+   */
+  private _getBasePrUrl(url: string): string | null {
+    try {
+      const urlObj = new URL(url);
+      // Match pattern: /owner/repo/pull/number
+      const match = urlObj.pathname.match(/^(\/[^\/]+\/[^\/]+\/pull\/\d+)/);
+      if (match) {
+        return `${urlObj.origin}${match[1]}`;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Checks if a tab URL belongs to the same PR as the given PR URL.
+   * This handles cases where users navigate to different sections of a PR
+   * (comments, files, commits) or have URL fragments.
+   */
+  private _isSamePr(tabUrl: string | undefined, prUrl: string): boolean {
+    if (!tabUrl) return false;
+    const tabBasePr = this._getBasePrUrl(tabUrl);
+    const prBasePr = this._getBasePrUrl(prUrl);
+    return tabBasePr !== null && prBasePr !== null && tabBasePr === prBasePr;
+  }
+
   private async _ungroupAndPositionAfterGroup(tabId: number) {
     try {
       if (this._currentGroupId === null) return;
@@ -168,12 +202,12 @@ export class TabGroupHandler {
       const allWindowTabs = await chrome.tabs.query({
         windowId: currentWindow.id,
       });
-      const prUrls = new Set(pullRequests.map((pr) => pr.url));
+      // Find ungrouped tabs that belong to any of our PRs (using smart matching)
       const ungroupedPrTabs = allWindowTabs.filter(
         (tab) =>
           tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE &&
           tab.url &&
-          prUrls.has(tab.url),
+          pullRequests.some((pr) => this._isSamePr(tab.url, pr.url)),
       );
 
       // Group any ungrouped PR tabs
@@ -205,16 +239,24 @@ export class TabGroupHandler {
 
       // Get all tabs in the group
       const tabs = await chrome.tabs.query({ groupId });
-      const existingUrls = new Map(tabs.map((tab) => [tab.url, tab]));
-      const processedUrls = new Set<string>();
+
+      // Track which PR URLs have been processed
+      const processedPrUrls = new Set<string>();
 
       // Add or update tabs for each PR
       for (const pr of pullRequests) {
-        if (existingUrls.has(pr.url)) {
-          // Tab already exists, just mark as processed
-          processedUrls.add(pr.url);
+        // Check if any existing tab belongs to this PR (handles URL variations)
+        const existingTab = tabs.find((tab) => this._isSamePr(tab.url, pr.url));
+
+        if (existingTab) {
+          // Tab already exists for this PR, just mark as processed
+          // Don't reload or modify the tab - user might be actively using it
+          processedPrUrls.add(pr.url);
+          if (this._debug) {
+            console.log("[SYNC-TABS] Tab already exists for PR:", pr.url, "at URL:", existingTab.url);
+          }
         } else {
-          // Create a new tab
+          // Create a new tab only if no tab exists for this PR
           const currentWindow = await chrome.windows.getCurrent();
           const newTab = await chrome.tabs.create({
             windowId: currentWindow.id,
@@ -232,7 +274,7 @@ export class TabGroupHandler {
                 groupId,
               });
               if (this._debug) {
-                console.log("[SYNC-TABS] Successfully grouped tab:", pr.url);
+                console.log("[SYNC-TABS] Successfully grouped new tab:", pr.url);
               }
             } catch (error) {
               console.error(
@@ -248,16 +290,17 @@ export class TabGroupHandler {
             }
           }
 
-          processedUrls.add(pr.url);
+          processedPrUrls.add(pr.url);
         }
       }
 
       // Remove tabs that no longer have PRs
       const tabsToRemove = tabs.filter((tab) => {
-        // Remove if it's not in our current PR list (but not placeholder tabs yet)
-        return (
-          tab.url && tab.url !== "about:blank" && !processedUrls.has(tab.url)
-        );
+        // Keep placeholder tabs and tabs that belong to current PRs
+        if (!tab.url || tab.url === "about:blank") return false;
+
+        // Check if this tab belongs to any of our current PRs
+        return !pullRequests.some((pr) => this._isSamePr(tab.url, pr.url));
       });
 
       for (const tab of tabsToRemove) {
@@ -493,18 +536,19 @@ export class TabGroupHandler {
     if (this._debug) console.log("[TAB-GROUP-LISTENER] Tab group listener set up");
   }
 
-  public async closeUngroupedPrTabs(prUrls: Set<string>) {
+  public async closeUngroupedPrTabs(pullRequests: Array<PullRequest>) {
     try {
       const currentWindow = await chrome.windows.getCurrent();
       const allWindowTabs = await chrome.tabs.query({
         windowId: currentWindow.id,
       });
 
+      // Find ungrouped tabs that belong to any of our PRs (using smart matching)
       const ungroupedPrTabs = allWindowTabs.filter(
         (tab) =>
           tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE &&
           tab.url &&
-          prUrls.has(tab.url),
+          pullRequests.some((pr) => this._isSamePr(tab.url, pr.url)),
       );
 
       if (ungroupedPrTabs.length > 0) {

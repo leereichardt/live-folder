@@ -94,7 +94,8 @@ export function SettingsForm({
             refreshInterval: data.refreshInterval,
             prFilter: data.prFilter,
             organizationFilter: data.organizationFilter || "",
-            ...(isChrome && data.tabGroupColor && { tabGroupColor: data.tabGroupColor }),
+            ...(isChrome &&
+              data.tabGroupColor && { tabGroupColor: data.tabGroupColor }),
           },
           "background",
         );
@@ -116,7 +117,9 @@ export function SettingsForm({
           name="name"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{isChrome ? "Tab Group Name" : "Folder Name"}</FormLabel>
+              <FormLabel>
+                {isChrome ? "Tab Group Name" : "Folder Name"}
+              </FormLabel>
               <FormControl>
                 <Input
                   placeholder="Pull Requests"
@@ -145,7 +148,7 @@ export function SettingsForm({
                         onClick={() => field.onChange(color)}
                         className={`h-8 w-8 rounded-md border-2 transition-all ${
                           field.value === color
-                            ? "border-primary scale-110"
+                            ? "scale-110 border-primary"
                             : "border-transparent hover:scale-105"
                         }`}
                         style={{

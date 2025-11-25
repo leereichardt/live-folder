@@ -37,7 +37,7 @@ jobs:
           firefox_file=$(ls .output/*-firefox.zip)
           echo "Uploading $firefox_file"
           echo "firefox_file=$firefox_file" >> $GITHUB_OUTPUT
-  
+
       - name: Upload Firefox artifact
         uses: actions/upload-artifact@v4
         with:
@@ -69,4 +69,3 @@ jobs:
         with:
           name: live-folder-chrome
           path: ${{ steps.find_chrome_zip.outputs.chrome_file }}
-

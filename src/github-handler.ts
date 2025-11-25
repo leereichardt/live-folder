@@ -21,7 +21,8 @@ export class GithubHandler {
   private readonly _PR_ROW_CLASS = ".js-issue-row";
   private readonly _PR_TITLE_CLASS = ".js-navigation-open";
   private readonly _PRS_ASSIGNED_URL = "https://github.com/pulls";
-  private readonly _PRS_REVIEW_REQUESTED_URL = "https://github.com/pulls/review-requested";
+  private readonly _PRS_REVIEW_REQUESTED_URL =
+    "https://github.com/pulls/review-requested";
 
   constructor({ debug }: { debug: boolean }) {
     this._debug = debug;
@@ -52,8 +53,6 @@ export class GithubHandler {
   }
 
   public isAuthenticatedFromCookie(cookie: Cookies.Cookie) {
-
-
     return (
       cookie.domain === this._GH_DOMAIN_WITH_SUBDOMAIN &&
       cookie.name === this._GH_COOKIE_NAME &&
@@ -74,7 +73,6 @@ export class GithubHandler {
   }
 
   public isAuthCookie(cookie: Cookies.Cookie) {
-
     return (
       cookie.domain === this._GH_DOMAIN_WITH_SUBDOMAIN &&
       cookie.name === this._GH_COOKIE_NAME
@@ -117,7 +115,10 @@ export class GithubHandler {
     return pullRequests;
   }
 
-  public async getPullRequests(filter: PrFilterType = "both", organizationFilter: string = "") {
+  public async getPullRequests(
+    filter: PrFilterType = "both",
+    organizationFilter: string = "",
+  ) {
     const newAuthState = await this.isAuthenticatedFromBrowser();
     this.updateAuthState(newAuthState);
 
@@ -144,7 +145,7 @@ export class GithubHandler {
       organizationFilter
         .split(",")
         .map((org) => org.trim().toLowerCase())
-        .filter((org) => org.length > 0)
+        .filter((org) => org.length > 0),
     );
     const hasOrgFilter = allowedOrgs.size > 0;
 
@@ -154,8 +155,21 @@ export class GithubHandler {
       );
 
       if (htmlError || !html) {
-        console.error("[GET-PULL-REQUESTS] Error fetching from", url, htmlError);
+        console.error(
+          "[GET-PULL-REQUESTS] Error fetching from",
+          url,
+          htmlError,
+        );
         continue;
+      }
+
+      // Check if we received a login/SSO page instead of PR list
+      if (this._isLoginOrSsoPage(html)) {
+        console.warn(
+          "[GET-PULL-REQUESTS] SSO required - received login page instead of PR list",
+        );
+        this._isAuthenticated = false;
+        return [];
       }
 
       const prs = await this._parsePRsFromHTML(html);
@@ -175,9 +189,32 @@ export class GithubHandler {
     }
 
     if (this._debug) {
-      console.log("[GET-PULL-REQUESTS] Found", allPullRequests.length, "PRs with filter:", filter, "orgs:", organizationFilter || "all");
+      console.log(
+        "[GET-PULL-REQUESTS] Found",
+        allPullRequests.length,
+        "PRs with filter:",
+        filter,
+        "orgs:",
+        organizationFilter || "all",
+      );
     }
 
     return allPullRequests;
+  }
+
+  private _isLoginOrSsoPage(html: string): boolean {
+    const $ = cheerio.load(html);
+
+    // Common GitHub login/SSO page indicators
+    const loginIndicators = [
+      'form[action*="/session"]',
+      'form[action*="/sessions"]',
+      ".auth-form",
+      'a[href*="sso"]',
+      'a[href*="saml"]',
+      "#login",
+    ];
+
+    return loginIndicators.some((selector) => $(selector).length > 0);
   }
 }

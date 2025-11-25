@@ -46,85 +46,6 @@ export class TabGroupHandler {
     }
   }
 
-  public async ensureTabGroup({
-    title,
-    color,
-    groupId,
-  }: {
-    title: string;
-    color: TabGroupColor;
-    groupId?: number;
-  }): Promise<number> {
-    try {
-      // Store base title
-      this._baseTitle = title;
-
-      // Set up listeners if not already done
-      this._setupTabListener();
-      this._setupTabGroupListener();
-
-      // First, try to find an existing group by title
-      const existingByTitle = await this.findTabGroupByTitle(title);
-      if (existingByTitle) {
-        // Update color if changed
-        if (existingByTitle.color !== color) {
-          await chrome.tabGroups.update(existingByTitle.id, { color });
-        }
-        this._currentGroupId = existingByTitle.id;
-        if (this._debug)
-          console.log(
-            "[ENSURE-TAB-GROUP] Using existing group by title:",
-            existingByTitle.id,
-          );
-        return existingByTitle.id;
-      }
-
-      // Check if the stored groupId is still valid
-      if (groupId !== undefined && groupId !== -1) {
-        const existingGroup = await this.getTabGroup(groupId);
-        if (existingGroup) {
-          // Update title and color if changed
-          if (existingGroup.title !== title || existingGroup.color !== color) {
-            await chrome.tabGroups.update(groupId, { title, color });
-          }
-          this._currentGroupId = groupId;
-          return groupId;
-        }
-      }
-
-      // Create a new group with a placeholder tab
-      // We'll keep this tab until we have real PR tabs
-      const currentWindow = await chrome.windows.getCurrent();
-      const tab = await chrome.tabs.create({
-        windowId: currentWindow.id,
-        active: false,
-        url: "about:blank",
-      });
-
-      if (!tab.id) {
-        throw new Error("Failed to create tab");
-      }
-
-      const newGroupId = await chrome.tabs.group({
-        tabIds: [tab.id],
-      });
-
-      await chrome.tabGroups.update(newGroupId, {
-        title,
-        color,
-        collapsed: true,
-      });
-
-      this._currentGroupId = newGroupId;
-      if (this._debug)
-        console.log("[ENSURE-TAB-GROUP] Created group:", newGroupId);
-      return newGroupId;
-    } catch (error) {
-      console.error("[ENSURE-TAB-GROUP] Error ensuring tab group:", error);
-      throw error;
-    }
-  }
-
   public async syncTabs({
     groupId,
     pullRequests,
@@ -223,8 +144,26 @@ export class TabGroupHandler {
           });
 
           if (newTab.id) {
-            // Small delay to ensure tab is ready to be grouped
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            // Wait for tab URL to load and validate it's still a PR URL
+            const finalUrl = await this._waitForTabUrl(newTab.id, 2000);
+            const isPrUrl =
+              finalUrl.includes("github.com") && finalUrl.includes("/pull/");
+
+            if (!isPrUrl) {
+              // Tab redirected to non-PR URL (likely SSO login page) - remove it
+              if (this._debug) {
+                console.warn(
+                  "[SYNC-TABS] Tab redirected to non-PR URL:",
+                  finalUrl || "empty/timeout",
+                );
+              }
+              try {
+                await chrome.tabs.remove(newTab.id);
+              } catch {
+                // Tab may already be gone
+              }
+              continue; // Skip to next PR, don't add to processedUrls
+            }
 
             try {
               await chrome.tabs.group({
@@ -240,11 +179,18 @@ export class TabGroupHandler {
                 newTab.id,
                 "into group",
                 groupId,
-                "- tab may be ungrouped. Error:",
+                "- removing orphaned tab. Error:",
                 error,
               );
-              // Tab was created but couldn't be grouped
-              // This can happen if the groupId became invalid
+              // Tab was created but couldn't be grouped - clean it up
+              try {
+                await chrome.tabs.remove(newTab.id);
+              } catch (removeError) {
+                console.error(
+                  "[SYNC-TABS] Failed to remove orphaned tab:",
+                  removeError,
+                );
+              }
             }
           }
 
@@ -266,9 +212,14 @@ export class TabGroupHandler {
         }
       }
 
+      // Re-query tabs to get fresh state including newly created tabs
+      const currentTabs = await chrome.tabs.query({ groupId });
+
       // Remove placeholder about:blank tabs only if we have real PR tabs
       if (pullRequests.length > 0) {
-        const placeholderTabs = tabs.filter((tab) => tab.url === "about:blank");
+        const placeholderTabs = currentTabs.filter(
+          (tab) => tab.url === "about:blank",
+        );
         for (const tab of placeholderTabs) {
           if (tab.id) {
             await chrome.tabs.remove(tab.id);
@@ -355,6 +306,107 @@ export class TabGroupHandler {
       console.error("[SYNC-TABS] Error syncing tabs:", error);
       return false;
     }
+  }
+
+  public async ensureTabGroup({
+    title,
+    color,
+    groupId,
+  }: {
+    title: string;
+    color: TabGroupColor;
+    groupId?: number;
+  }): Promise<number> {
+    try {
+      // Store base title
+      this._baseTitle = title;
+
+      // Set up listeners if not already done
+      this._setupTabListener();
+      this._setupTabGroupListener();
+
+      // First, try to find an existing group by title
+      const existingByTitle = await this.findTabGroupByTitle(title);
+      if (existingByTitle) {
+        // Update color if changed
+        if (existingByTitle.color !== color) {
+          await chrome.tabGroups.update(existingByTitle.id, { color });
+        }
+        this._currentGroupId = existingByTitle.id;
+        if (this._debug)
+          console.log(
+            "[ENSURE-TAB-GROUP] Using existing group by title:",
+            existingByTitle.id,
+          );
+        return existingByTitle.id;
+      }
+
+      // Check if the stored groupId is still valid
+      if (groupId !== undefined && groupId !== -1) {
+        const existingGroup = await this.getTabGroup(groupId);
+        if (existingGroup) {
+          // Update title and color if changed
+          if (existingGroup.title !== title || existingGroup.color !== color) {
+            await chrome.tabGroups.update(groupId, { title, color });
+          }
+          this._currentGroupId = groupId;
+          return groupId;
+        }
+      }
+
+      // Create a new group with a placeholder tab
+      // We'll keep this tab until we have real PR tabs
+      const currentWindow = await chrome.windows.getCurrent();
+      const tab = await chrome.tabs.create({
+        windowId: currentWindow.id,
+        active: false,
+        url: "about:blank",
+      });
+
+      if (!tab.id) {
+        throw new Error("Failed to create tab");
+      }
+
+      const newGroupId = await chrome.tabs.group({
+        tabIds: [tab.id],
+      });
+
+      await chrome.tabGroups.update(newGroupId, {
+        title,
+        color,
+        collapsed: true,
+      });
+
+      this._currentGroupId = newGroupId;
+      if (this._debug)
+        console.log("[ENSURE-TAB-GROUP] Created group:", newGroupId);
+      return newGroupId;
+    } catch (error) {
+      console.error("[ENSURE-TAB-GROUP] Error ensuring tab group:", error);
+      throw error;
+    }
+  }
+
+  private async _waitForTabUrl(
+    tabId: number,
+    timeoutMs: number = 2000,
+  ): Promise<string> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        const url = tab.url || "";
+        // Check if tab has loaded a real URL (not about:blank or chrome internal pages)
+        if (url && url !== "about:blank" && !url.startsWith("chrome")) {
+          return url;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      } catch {
+        // Tab might have been closed
+        return "";
+      }
+    }
+    return "";
   }
 
   public async positionGroupAfterPinnedTabs(groupId: number) {
@@ -484,13 +536,18 @@ export class TabGroupHandler {
       if (group.id !== this._currentGroupId) return;
 
       // If expanded and title has new PR count, reset to base title
-      if (!group.collapsed && this._baseTitle && group.title !== this._baseTitle) {
+      if (
+        !group.collapsed &&
+        this._baseTitle &&
+        group.title !== this._baseTitle
+      ) {
         await this._resetTitle();
       }
     });
 
     this._groupListenerSetup = true;
-    if (this._debug) console.log("[TAB-GROUP-LISTENER] Tab group listener set up");
+    if (this._debug)
+      console.log("[TAB-GROUP-LISTENER] Tab group listener set up");
   }
 
   public async closeUngroupedPrTabs(prUrls: Set<string>) {

@@ -9,12 +9,14 @@ You can customize the folder's name, pull request's title format, and interval b
 ## Build
 
 Build for Chrome:
+
 ```bash
 bun install
 bun run zip
 ```
 
 Build for Firefox:
+
 ```bash
 bun install
 bun run zip:firefox
@@ -23,12 +25,14 @@ bun run zip:firefox
 ## Development
 
 Run the development server for Chrome:
+
 ```bash
 bun install
 bun run dev
 ```
 
 Run the development server for Firefox:
+
 ```bash
 bun install
 bun run dev:firefox
@@ -37,4 +41,3 @@ bun run dev:firefox
 ## License
 
 [MIT](https://github.com/s0rus/live-folder/blob/main/LICENSE)
-
